@@ -503,19 +503,40 @@ func (ps *PushContext) DestinationRule(proxy *Proxy, service *Service) *Config {
 	}
 
 	// search through the DestinationRules in proxy's namespace first
+	var localDestRule *Config
+	var localDestRuleHost Hostname
 	if ps.namespaceLocalDestRules[proxy.ConfigNamespace] != nil {
 		if host, ok := MostSpecificHostMatch(service.Hostname,
 			ps.namespaceLocalDestRules[proxy.ConfigNamespace].hosts); ok {
-			return ps.namespaceLocalDestRules[proxy.ConfigNamespace].destRule[host].config
+			localDestRule = ps.namespaceLocalDestRules[proxy.ConfigNamespace].destRule[host].config
+			localDestRuleHost = host
 		}
 	}
 
-	// if no private/public rule matched in the calling proxy's namespace,
 	// check the target service's namespace for public rules
+	var targetDestRule *Config
+	var targetDestRuleHost Hostname
 	if service.Attributes.Namespace != "" && ps.namespaceExportedDestRules[service.Attributes.Namespace] != nil {
 		if host, ok := MostSpecificHostMatch(service.Hostname,
 			ps.namespaceExportedDestRules[service.Attributes.Namespace].hosts); ok {
-			return ps.namespaceExportedDestRules[service.Attributes.Namespace].destRule[host].config
+			targetDestRule = ps.namespaceExportedDestRules[service.Attributes.Namespace].destRule[host].config
+			targetDestRuleHost = host
+		}
+	}
+
+	// use a rule either from the namespace of the proxy or from the namespace of the target service
+	// unless neither contains any matching rules
+	if localDestRule != nil && targetDestRule == nil {
+		return localDestRule
+	} else if localDestRule == nil && targetDestRule != nil {
+		return targetDestRule
+	} else if localDestRule != nil && targetDestRule != nil {
+		// in case there are matching rules present in both namespaces pick more specific one
+		// preferring the rule in the proxy namespace (i.e. the local one) in case of a tie
+		if localDestRuleHost.SubsetOf(targetDestRuleHost) {
+			return localDestRule
+		} else {
+			return targetDestRule
 		}
 	}
 
